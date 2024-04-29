@@ -17,7 +17,12 @@ You will also need your own OpenAI API key, which can be obtained on your [OpenA
 
 ### Running the script
 
-To run this script on your local machine, you will need to clone this repository. After that, you can navigate in the folder and execute the app with:
+To run this script on your local machine, you will need to clone this repository:
+```
+git clone https://github.com/NightmindOfficial/wmcc_storybot.git
+```
+
+After that, you can navigate in the folder and execute the app with:
 ```
 streamlit run storybot.py
 ```
