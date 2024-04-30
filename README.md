@@ -19,8 +19,6 @@ Furthermore, you will need to install the following packages:
 |`langchain`|`pip install --upgrade langchain`|
 |`langchain-openai`|`pip install --upgrade langchain-openai`|
 
-You will also need `streamlit` for running the app, which can be installed by the package manager of your liking, e.g. with `pip install streamlit`.
-Finally, you will need the `openai` package, which can be installed via the same way: `pip install openai`.
 Other packages needed by the script should come with the base installation of your `Python` distribution.
 
 You will also need your own OpenAI API key, which can be obtained on your [OpenAI Account page](https://platform.openai.com/docs/quickstart/account-setup).
