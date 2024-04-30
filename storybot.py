@@ -146,8 +146,6 @@ def getBotResponse(client,user_prompt):
         prompt = getPromptTemplate(st.session_state.conv_stage)
         chat_history = st.session_state.chat_history[1:] # Do not include the first (hard-coded) intro message
         chain = prompt | client | JsonOutputParser()
-        print(chat_history)
-
         # NOTE: I intentionally decided not to use a stream here. It does not make too much sense streaming an (incomplete) JSON object. Since the story pieces are not
         # too long and the user is notified of the "thinking" with a spinner, this does not impair the user experience too much in my opinion.
         output = chain.invoke({
@@ -182,6 +180,31 @@ def generateImage(client, prompt):
         )
     
     return response.data[0].url
+
+def submitPrompt(prompt, chat_openai_client):
+    addMessage("user", prompt)
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Writing in progress, hold tight..."):
+            try:
+                response = getBotResponse(chat_openai_client,prompt)
+                addMessage("assistant", response["story"])
+
+                st.session_state.dalle_task = response["dalle-prompt"]
+                st.session_state.conv_stage = min(2, st.session_state.conv_stage + 1)
+                st.session_state.prompt_disabled = True
+                # ! remove before flight.
+                print(response)
+
+                if (st.session_state.conv_stage == 2):
+                    for i in range(1, 4):
+                        st.session_state.prompt_buttons.append(response[f"opt{i}"])
+                st.rerun()
+            except Exception as e:
+                st.error(f"Whoops, something did not work out as expected. Maybe your input violated a content policy? You can try again and see if the next attempt runs smoothly. {e}")
+
 
 # Returns a hard-coded greeting message for the user. Using the OpenAI interface for this would be inefficient, since the text is not helpful for generating the messages.
 def introMessage():
@@ -246,6 +269,12 @@ def main():
         st.sidebar.write("Feeling sleepy? Log out to prevent unauthorized use. Your API key will not be stored permanently in this program.")
         logout = st.sidebar.button("Log out")
         st.sidebar.divider()
+
+        st.sidebar.subheader("Reset Conversation")
+        st.sidebar.write("Want to create another exciting story? Is the Chat not working as intended? You can reset the entire conversation here. You can also tell BedtimeBuddy to end the story to finish the current storyline.")
+        reset = st.sidebar.button("Reset")
+        st.sidebar.divider()
+
         st.sidebar.subheader("GPT Model Selector")
         st.sidebar.write("You can choose the GPT model used for generating the bedtime stories and images.")
         gpt_model_selector = st.sidebar.selectbox(
@@ -260,25 +289,9 @@ def main():
             index=1, # dall-e-3 is the default model
             help="Dall-E 2 costs approx. 0.02\$/image, DALL-E 3 about 0.04\$/image.",
         )
-
         st.sidebar.divider()
-        st.sidebar.subheader("Reset Conversation")
-        st.sidebar.write("Want to create another exciting story? Is the Chat not working as intended? You can reset the entire conversation here. You can also tell BedtimeBuddy to end the story to finish the current storyline.")
-        reset = st.sidebar.button("Reset")
 
-        # Initialize OpenAI object with provided credentials (which are already validated, so no need to double-check here)
-        dalle = OpenAI(api_key=st.session_state.api_key)
-        chat_openai_client = ChatOpenAI(model=st.session_state.gpt_model, openai_api_key=st.session_state.api_key)
-
-    
-        st.title("BedtimeBuddy 🦄")
-
-        # In case the dashboard is loaded for the first time after login, generate a new intro message.
-        if 'chat_history' not in st.session_state:
-            introMessage()
-
-        if 'image_urls' not in st.session_state:
-            st.session_state.image_urls = []
+        st.sidebar.caption(f"Debug: Stage {st.session_state.conv_stage}")
 
         # Initialize the model choice in the st session_state if not done already
         if 'gpt_model' not in st.session_state:
@@ -287,29 +300,45 @@ def main():
         if 'dalle_model' not in st.session_state:
             st.session_state.dalle_model=dalle_model_selector
 
+        # In case the dashboard is loaded for the first time after login, generate a new intro message.
+        if 'chat_history' not in st.session_state:
+            introMessage()
+
+        if 'image_urls' not in st.session_state:
+            st.session_state.image_urls = []
+
+        if 'prompt_buttons' not in st.session_state:
+            st.session_state.prompt_buttons = []
+
+
+        # Initialize OpenAI object with provided credentials (which are already validated, so no need to double-check here)
+        dalle = OpenAI(api_key=st.session_state.api_key)
+        chat_openai_client = ChatOpenAI(model=st.session_state.gpt_model, openai_api_key=st.session_state.api_key)
+
+    
+        st.title("BedtimeBuddy 🦄")
+
         col1, col2 = st.columns((75,25))
 
         with col1.container(border=1):
             st.subheader("Chat")
             showChatHistory()
+
+            if (st.session_state.conv_stage == 2 and st.session_state.prompt_buttons != []):
+                st.markdown("**Here's what could happen:**")
+                btncol1, btncol2, btncol3 = st.columns(3)
+                with btncol1:
+                    st.button(st.session_state.prompt_buttons[0], disabled=st.session_state.prompt_disabled, on_click=submitPrompt, args=[st.session_state.prompt_buttons[0], chat_openai_client])
+                with btncol2:
+                    st.button(st.session_state.prompt_buttons[1], disabled=st.session_state.prompt_disabled, on_click=submitPrompt, args=[st.session_state.prompt_buttons[1], chat_openai_client])
+                with btncol3:
+                    st.button(st.session_state.prompt_buttons[2], disabled=st.session_state.prompt_disabled, on_click=submitPrompt, args=[st.session_state.prompt_buttons[2], chat_openai_client])
+
             prompt = st.chat_input(chatInputPrompts[st.session_state.conv_stage], max_chars=250, disabled=st.session_state.prompt_disabled)
+            
 
             if (prompt != None) and (prompt.strip() != ""):
-                addMessage("user", prompt)
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-
-                with st.chat_message("assistant"):
-                    with st.spinner("Writing in progress, hold tight..."):
-                        try:
-                            response = getBotResponse(chat_openai_client,prompt)
-                            addMessage("assistant", response["story"])
-                            st.session_state.dalle_task = response["dalle-prompt"]
-                            st.session_state.conv_stage = min(2, st.session_state.conv_stage + 1)
-                            st.session_state.prompt_disabled = True
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Whoops, something did not work out as expected. Maybe your input violated a content policy? You can try again and see if the next attempt runs smoothly. {e}")
+                submitPrompt(prompt, chat_openai_client)
 
         with col2.container(border=1):
             st.subheader("Images")
@@ -334,6 +363,7 @@ def main():
         if reset:
             st.session_state.chat_history = []
             st.session_state.image_urls = []
+            st.session_state.prompt_buttons = []
             st.session_state.dalle_task = False
             st.session_state.conv_stage = 0
             st.session_state.toast_msg = 'Chat has been reset successfully!'
