@@ -22,6 +22,8 @@ Furthermore, you will need to install the following packages:
 
 Other packages needed by the script should come with the base installation of your `Python` distribution.
 
+In case you are using a conda environment, make sure to activate the environment first before running the `streamlit` command.
+
 You will also need your own OpenAI API key, which can be obtained on your [OpenAI Account page](https://platform.openai.com/docs/quickstart/account-setup).
 
 ### Running the script
