@@ -15,6 +15,7 @@ from langchain.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain.chains import LLMChain
 from IPython.display import Image, display
+import tiktoken
 
 
 ### * 01 FINAL VARIABLES * ###
@@ -53,7 +54,7 @@ aiIntroMessages = [
 
 promptTemplates = [
     PromptTemplate( # * STAGE 0 - START OF A STORY, ASKING FOR FOLLOW-UP (NO BUTTONS)
-        input_variables=["user-prompt","chat-history"],
+        input_variables=["userprompt","chathistory"],
         template="""
         You are a chatbot whose sole purpose is to write bedtime stories for younger children. If the user input is not related to a story, you kindly direct them to giving input for a bedtime story.
         Your output must at all times be child-friendly, easy to understand for a young audience, and exciting to read. 
@@ -62,11 +63,11 @@ promptTemplates = [
         'story' is your story fragment, which must contain a small cliffhanger at the end to allow the story to be continued. Only include the BEGINNING OF THE STORY in the value for 'story' together with a friendly question to the user asking for input on how the story should continue. 
         'dalle-prompt' is a shorter prompt summarizing the current story part for a future dall-e prompt.
 
-        User Input: {user-prompt}
+        User Input: {userprompt}
         """,
     ),
     PromptTemplate( # * STAGE 1 - CONTINUATION OF A STORY, ASKING FOR FOLLOW-UP (WITH BUTTONS)
-        input_variables=["user-prompt","chat-history"],
+        input_variables=["userprompt","chathistory"],
         template="""
         You are a chatbot whose sole purpose is to write bedtime stories for younger children. If the user input is not related to a story, you kindly direct them to giving input for a bedtime story.
         Your output must at all times be child-friendly, easy to understand for a young audience, and exciting to read. 
@@ -77,9 +78,9 @@ promptTemplates = [
         The 'opt1', 'opt2', 'opt3' keys should contain keywords of 1 to 3 words, suggesting how the story could continue.
         IF YOU FIND THAT THE USER MENTIONS TO END THE STORY IN THE CHAT HISTORY, WRITE A HAPPY END WITH NO FURTHER CLIFFHANGERS INSTEAD FOR THE 'STORY' VALUE AND MAKE SURE TO END ON "THE END". IN THIS CASE, DO NOT INCLUDE ANY 'OPT' KEYS IN YOUR ANSWER.
 
-        User Input: {user-prompt}
+        User Input: {userprompt}
 
-        Chat History: {chat-history}
+        Chat History: {chathistory}
         """,
     ),
 ]
@@ -128,6 +129,11 @@ def showChatHistory():
                 with st.chat_message(msg["role"]):
                     st.markdown(msg["content"])
 
+#TODO add explainer
+def checkContentViolation(client, prompt):
+    response = client.moderations.create(input=prompt)
+    return response.results[0].flagged
+
 # TODO Add Explainer Comment
 def addMessage(role, content):
     if 'chat_history' not in st.session_state:
@@ -137,13 +143,14 @@ def addMessage(role, content):
 # TODO Add Explainer Comment
 def getBotResponse(client,user_prompt):
         prompt = getPromptTemplate(st.session_state.conv_stage)
-        chat_history = st.session_state.chat_history[1:] # Do not include the first (hard-coded) intro message
+        chat_history = reduceChatHistoryLength(user_prompt)
+        
         chain = prompt | client | JsonOutputParser()
         # NOTE: I intentionally decided not to use a stream here. It does not make too much sense streaming an (incomplete) JSON object. Since the story pieces are not
         # too long and the user is notified of the "thinking" with a spinner, this does not impair the user experience too much in my opinion.
         output = chain.invoke({
-            "chat-history": chat_history,
-            "user-prompt": user_prompt
+            "chathistory": chat_history,
+            "userprompt": user_prompt
         })
         return output
 
@@ -186,6 +193,30 @@ def introMessage():
     addMessage("assistant", aiIntroMessages[random.randint(0,len(aiIntroMessages)-1)])
 
 
+# Helper Function to count the number of tokens in a given text.
+def count_tokens(input):
+    encoding = tiktoken.encoding_for_model(st.session_state.gpt_model)
+    encodedString=encoding.encode(input)
+    return len(encodedString)
+
+
+# Function to manage the chat history length considering the token length of the total prompt, keeping within specified token limits.
+def reduceChatHistoryLength(user_prompt, max_tokens=4000):
+    prompt = getPromptTemplate(st.session_state.conv_stage)
+    chat_history = st.session_state.chat_history[1:] # Do not include the first (hard-coded) intro message
+
+
+    total_text = " ".join(prompt.format(chathistory = chat_history, userprompt= user_prompt))
+    total_tokens = count_tokens(total_text)
+
+    # Truncate chat history if the total tokens exceed the maximum allowed
+    while total_tokens > max_tokens and len(chat_history) > 1:
+        # Remove oldest entries until under limit
+        removed_text = chat_history.pop(0)
+        total_text = " ".join(prompt.format(chathistory = chat_history, userprompt= user_prompt))
+        total_tokens = count_tokens(total_text)
+    st.session_state.prompt_token_len = total_tokens
+    return chat_history
 
 ### * 04 MAIN FUNCTION * ###
 # Where all the frontend layouting and function calling happens. This is the core of my streamlit application.
@@ -206,6 +237,9 @@ def main():
     # Checks every rerun if a toast message has been stored prior to executing the rerun, and shows the toast if necessary.
     if st.session_state.toast_msg != False:
         display_toast_msg(st.session_state.toast_msg)
+
+    if 'prompt_token_len' not in st.session_state:
+        st.session_state.prompt_token_len = 0
 
     # * LOGIN / WELCOME PAGE if the user is not logged in / has just logged out
     if not st.session_state.logged_in:
@@ -266,7 +300,7 @@ def main():
         )
         st.sidebar.divider()
 
-        st.sidebar.caption(f"Debug: Stage {st.session_state.conv_stage}")
+        st.sidebar.caption(f"Debug: Stage {st.session_state.conv_stage}, Token Length {st.session_state.prompt_token_len}")
 
         # Initialize the model choices in the st session_state regularly on app rerun
         st.session_state.gpt_model=gpt_model_selector
@@ -297,37 +331,41 @@ def main():
 
             # ! Check Position
             def submitPrompt(prompt, chat_openai_client):
-                addMessage("user", prompt)
-                with st.chat_message("user"):
-                    st.markdown(prompt)
+                try:
+                    if checkContentViolation(dalle,prompt):
+                            st.warning("Sorry, this prompt violates OpenAI's content policies and might not be suitable for children. It has not been added to your chat history. Please choose a different prompt in a second...")
+                    else:
+                        addMessage("user", prompt)
+                        with st.chat_message("user"):
+                            st.markdown(prompt)
 
-                with st.chat_message("assistant"):
-                    with st.spinner("Writing a great story, hold tight..."):
-                        try:
-                            response = getBotResponse(chat_openai_client,prompt)
-                            addMessage("assistant", response["story"])
+                        with st.chat_message("assistant"):
+                            with st.spinner("Writing a great story, hold tight..."):
 
-                            st.session_state.dalle_task = response["dalle-prompt"]
-                            st.session_state.prompt_disabled = True
-                            # ! remove before flight.
-                            print(response)
+                                    response = getBotResponse(chat_openai_client,prompt)
+                                    addMessage("assistant", response["story"])
 
-                            if (st.session_state.conv_stage == 1):
-                                st.session_state.prompt_buttons = []
-                                try:
-                                    for i in range(1, 4):
-                                        if response[f"opt{1}" == '']:
-                                            raise Exception
-                                        st.session_state.prompt_buttons.append(response[f"opt{i}"])
-                                except Exception as e:
-                                    st.session_state.toast_msg = "No buttons are displayed, as the story reached its end (or an error occurred)."
-                                    st.session_state.conv_stage = 0
+                                    st.session_state.dalle_task = response["dalle-prompt"]
+                                    st.session_state.prompt_disabled = True
+                                    # ! remove before flight.
+                                    print(response)
+                                    if (st.session_state.conv_stage == 1):
+                                        st.session_state.prompt_buttons = []
+                                        try:
+                                            for i in range(1, 4):
+                                                if response[f"opt{i}"] == '':
+                                                    raise Exception
+                                                else:
+                                                    st.session_state.prompt_buttons.append(response[f"opt{i}"])
+                                        except Exception as e:
+                                            st.session_state.toast_msg = "No buttons are displayed, as the story reached its end (or an error occurred)."
+                                            st.session_state.conv_stage = 0
+                                            st.rerun()
+
+                                    st.session_state.conv_stage = 1
                                     st.rerun()
-
-                            st.session_state.conv_stage = 1
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Whoops, something did not work out as expected. Maybe your input violated a content policy? You can try again and see if the next attempt runs smoothly. {e}")
+                except Exception as e:
+                        st.error(f"Whoops, something did not work out as expected. Maybe your input violated a content policy? You can try again and see if the next attempt runs smoothly. {e}")
 
 
             if st.session_state.prompt_callback:
@@ -397,7 +435,9 @@ def main():
         
         if logout:
             st.session_state.logged_in = False
-            del st.session_state.api_key
+            for key in st.session_state.keys():
+                del st.session_state[key]
+
             st.session_state.toast_msg = "Logged out successfully. Sweet dreams!"
             st.rerun()
 
