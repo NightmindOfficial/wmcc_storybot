@@ -18,6 +18,7 @@ Furthermore, you will need to install the following packages:
 |`openai`|`pip install openai`|
 |`langchain`|`pip install --upgrade langchain`|
 |`langchain-openai`|`pip install --upgrade langchain-openai`|
+|`tiktoken`|`pip install --upgrade tiktoken`|
 
 Other packages needed by the script should come with the base installation of your `Python` distribution.
 
@@ -41,6 +42,18 @@ https://localhost:8501
 ```
 
 **Note: The program will ask you to provide your own API key since I cannot reliably ensure everyone has an API key in their envs.**
+
+## General guidance
+
+On the sidebar, you can control which GPT models are used, log out, reset the chatbot, and view some debug information (e.g., total tokens used in the last prompt).
+
+After the first two user inputs, the bot suggests three keyword options to continue the story from. Klicking the buttons directly continues the story with the selected prompt.
+
+After the next story fragment is generated, you have to wait for the corresponding image to generate before continuing with the next story.
+
+During generation, you can still update the current prompt by re-submitting a new prompt or clicking on one of the remaining buttons. This is by design to allow for instantaneous changes in case you misclicked something.
+
+To have the bot write a (happy) end for your story, instruct the bot to "end the story now", or a similar prompt. Story endings will not have any keyword suggestions attached. However, the chat history does not clear, making it possible to continue a second story which intertwines with the plot of the previous story and allows your children to unleash their creativity to their fullest!
 
 ## Feedback / Questions
 
