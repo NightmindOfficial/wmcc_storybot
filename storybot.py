@@ -23,7 +23,7 @@ from IPython.display import Image, display
 setup_link = "https://platform.openai.com/docs/quickstart/account-setup"
 
 # To be able to initialize the session state variables in a loop, this list references all keys to be initialized.
-sessionStateKeys = ['logged_in', 'toast_msg', 'conversation_stage', 'dalle_task', 'prompt_disabled']
+sessionStateKeys = ['logged_in', 'toast_msg', 'conversation_stage', 'dalle_task', 'prompt_disabled', 'prompt_callback']
 
 # The app allows the user to choose the GPT model it should use for generating the stories. The options, however, are limited to these three models.
 gpt_model_options = ['gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo',]
@@ -33,7 +33,7 @@ dalle_model_options = ['dall-e-2', 'dall-e-3']
 chatInputPrompts = [
     'Start off your journey by entering the first few lines of a story, or give me a general theme.',
     'How should the story continue?',
-    'How should the story continue? Use one of the suggestions above, or write some manual input.'
+    'How should we continue? Use one of the suggestions above, or write some manual input.'
 ]
 
 # The initial message from the AI chatbot is hardcoded to waste as little tokens as possible. To not make the experience too boring for the user, the chat will pick one of these variations at random.
@@ -65,22 +65,7 @@ promptTemplates = [
         User Input: {user-prompt}
         """,
     ),
-    PromptTemplate( # * STAGE 1 -  CONTINUATION OF A STORY, ASKING FOR FOLLOW-UP (WITHOUT BUTTONS)
-        input_variables=["user-prompt","chat-history"],
-        template="""
-        You are a chatbot whose sole purpose is to write bedtime stories for younger children. If the user input is not related to a story, you kindly direct them to giving input for a bedtime story.
-        Your output must at all times be child-friendly, easy to understand for a young audience, and exciting to read. 
-        It should not contain difficult words and should be written in a bedtime story style.
-        Your answers should be structured in a JSON format, and include the following keys: 'story', 'dalle-prompt'.
-        'story' is your story fragment, which must contain a small cliffhanger at the end to allow the story to be continued. The story MUST relate to the story parts previously generated during the conversation listed under "chat history" and must not contain any plotholes.
-        'dalle-prompt' is a shorter prompt summarizing the current story part for a future dall-e prompt.
-
-        User Input: {user-prompt}
-
-        Chat History: {chat-history}
-        """,
-    ),
-    PromptTemplate( # * STAGE 2 - CONTINUATION OF A STORY, ASKING FOR FOLLOW-UP (WITH BUTTONS)
+    PromptTemplate( # * STAGE 1 - CONTINUATION OF A STORY, ASKING FOR FOLLOW-UP (WITH BUTTONS)
         input_variables=["user-prompt","chat-history"],
         template="""
         You are a chatbot whose sole purpose is to write bedtime stories for younger children. If the user input is not related to a story, you kindly direct them to giving input for a bedtime story.
@@ -90,7 +75,7 @@ promptTemplates = [
         'story' is your story fragment, which must contain a small cliffhanger at the end to allow the story to be continued. The story MUST relate to the story parts previously generated during the conversation listed under "chat history" and must not contain any plotholes.
         'dalle-prompt' is a shorter prompt summarizing the current story part for a future dall-e prompt. 
         The 'opt1', 'opt2', 'opt3' keys should contain keywords of 1 to 3 words, suggesting how the story could continue.
-        IF YOU FIND THAT THE USER MENTIONS TO END THE STORY IN THE CHAT HISTORY, WRITE A HAPPY END WITH NO FURTHER CLIFFHANGERS INSTEAD FOR THE 'STORY' VALUE AND MAKE SURE TO END ON "THE END".
+        IF YOU FIND THAT THE USER MENTIONS TO END THE STORY IN THE CHAT HISTORY, WRITE A HAPPY END WITH NO FURTHER CLIFFHANGERS INSTEAD FOR THE 'STORY' VALUE AND MAKE SURE TO END ON "THE END". IN THIS CASE, DO NOT INCLUDE ANY 'OPT' KEYS IN YOUR ANSWER.
 
         User Input: {user-prompt}
 
@@ -126,6 +111,14 @@ def display_toast_msg(msg, icon='✅'):
 # TODO Add Explainer Comment
 def getPromptTemplate(conversation_stage):
     return promptTemplates[conversation_stage]
+
+#TODO
+def getChatInputPrompt():
+    if (st.session_state.conv_stage == 0):
+        return chatInputPrompts[0]
+    elif(st.session_state.conv_stage == 1 and not st.session_state.prompt_buttons == []):
+        return chatInputPrompts[2]
+    return chatInputPrompts[1]
 
 
 # TODO Add Explainer Comment
@@ -171,40 +164,22 @@ def addImage(url, caption):
 
 # TODO Add Explainer Comment
 def generateImage(client, prompt):
-    response = client.images.generate(
-        model=st.session_state.dalle_model,
-        prompt=prompt,
-        size="1024x1024",
-        quality="standard",
-        n=1,
-        )
+    # ! ADD BACK BEFORE FLIGHT
+    #response = client.images.generate(
+    #    model=st.session_state.dalle_model,
+    #    prompt=prompt,
+    #    size="1024x1024",
+    #    quality="standard",
+    #    n=1,
+    #    )
     
-    return response.data[0].url
+    # return response.data[0].url
+    return 'https://placehold.it/1024'
 
-def submitPrompt(prompt, chat_openai_client):
-    addMessage("user", prompt)
-    with st.chat_message("user"):
-        st.markdown(prompt)
-
-    with st.chat_message("assistant"):
-        with st.spinner("Writing in progress, hold tight..."):
-            try:
-                response = getBotResponse(chat_openai_client,prompt)
-                addMessage("assistant", response["story"])
-
-                st.session_state.dalle_task = response["dalle-prompt"]
-                st.session_state.conv_stage = min(2, st.session_state.conv_stage + 1)
-                st.session_state.prompt_disabled = True
-                # ! remove before flight.
-                print(response)
-
-                if (st.session_state.conv_stage == 2):
-                    for i in range(1, 4):
-                        st.session_state.prompt_buttons.append(response[f"opt{i}"])
-                st.rerun()
-            except Exception as e:
-                st.error(f"Whoops, something did not work out as expected. Maybe your input violated a content policy? You can try again and see if the next attempt runs smoothly. {e}")
-
+def buttonCallback(prompt):
+    st.session_state.prompt_buttons = []
+    st.session_state.prompt_callback = prompt
+    # No rerun here, since this is a callback function.
 
 # Returns a hard-coded greeting message for the user. Using the OpenAI interface for this would be inefficient, since the text is not helpful for generating the messages.
 def introMessage():
@@ -256,7 +231,7 @@ def main():
                 st.session_state.toast_msg = "Logged in successfully. Let's create a great story together!"
 
                 # * Sets the conversation stage to 0. This means that the chat has just started, affecting which prompt template will be used as well as the wording of the chat input placeholder.
-                # * Possible values: 0 (initial stage - first iteration without buttons), 1 (continuation - without button as options), 2 (continuation - WITH buttons)
+                # * Possible values: 0 (initial stage - first iteration without buttons), 1 (continuation - with buttons)
                 st.session_state.conv_stage = 0
                 st.rerun()
             else:
@@ -293,12 +268,9 @@ def main():
 
         st.sidebar.caption(f"Debug: Stage {st.session_state.conv_stage}")
 
-        # Initialize the model choice in the st session_state if not done already
-        if 'gpt_model' not in st.session_state:
-            st.session_state.gpt_model=gpt_model_selector
-
-        if 'dalle_model' not in st.session_state:
-            st.session_state.dalle_model=dalle_model_selector
+        # Initialize the model choices in the st session_state regularly on app rerun
+        st.session_state.gpt_model=gpt_model_selector
+        st.session_state.dalle_model=dalle_model_selector
 
         # In case the dashboard is loaded for the first time after login, generate a new intro message.
         if 'chat_history' not in st.session_state:
@@ -309,7 +281,6 @@ def main():
 
         if 'prompt_buttons' not in st.session_state:
             st.session_state.prompt_buttons = []
-
 
         # Initialize OpenAI object with provided credentials (which are already validated, so no need to double-check here)
         dalle = OpenAI(api_key=st.session_state.api_key)
@@ -324,21 +295,75 @@ def main():
             st.subheader("Chat")
             showChatHistory()
 
-            if (st.session_state.conv_stage == 2 and st.session_state.prompt_buttons != []):
+            # ! Check Position
+            def submitPrompt(prompt, chat_openai_client):
+                addMessage("user", prompt)
+                with st.chat_message("user"):
+                    st.markdown(prompt)
+
+                with st.chat_message("assistant"):
+                    with st.spinner("Writing a great story, hold tight..."):
+                        try:
+                            response = getBotResponse(chat_openai_client,prompt)
+                            addMessage("assistant", response["story"])
+
+                            st.session_state.dalle_task = response["dalle-prompt"]
+                            st.session_state.prompt_disabled = True
+                            # ! remove before flight.
+                            print(response)
+
+                            if (st.session_state.conv_stage == 1):
+                                st.session_state.prompt_buttons = []
+                                try:
+                                    for i in range(1, 4):
+                                        if response[f"opt{1}" == '']:
+                                            raise Exception
+                                        st.session_state.prompt_buttons.append(response[f"opt{i}"])
+                                except Exception as e:
+                                    st.session_state.toast_msg = "No buttons are displayed, as the story reached its end (or an error occurred)."
+                                    st.session_state.conv_stage = 0
+                                    st.rerun()
+
+                            st.session_state.conv_stage = 1
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Whoops, something did not work out as expected. Maybe your input violated a content policy? You can try again and see if the next attempt runs smoothly. {e}")
+
+
+            if st.session_state.prompt_callback:
+                prompt = st.session_state.prompt_callback
+                st.session_state.prompt_callback = False
+                submitPrompt(prompt, chat_openai_client)
+
+
+            if (st.session_state.conv_stage == 1 and st.session_state.prompt_buttons != []):
                 st.markdown("**Here's what could happen:**")
                 btncol1, btncol2, btncol3 = st.columns(3)
                 with btncol1:
-                    st.button(st.session_state.prompt_buttons[0], disabled=st.session_state.prompt_disabled, on_click=submitPrompt, args=[st.session_state.prompt_buttons[0], chat_openai_client])
+                    st.button(st.session_state.prompt_buttons[0], 
+                                disabled=st.session_state.prompt_disabled, 
+                                on_click=buttonCallback, 
+                                args=[st.session_state.prompt_buttons[0]], 
+                                use_container_width=True)
                 with btncol2:
-                    st.button(st.session_state.prompt_buttons[1], disabled=st.session_state.prompt_disabled, on_click=submitPrompt, args=[st.session_state.prompt_buttons[1], chat_openai_client])
+                    st.button(st.session_state.prompt_buttons[1], 
+                                disabled=st.session_state.prompt_disabled, 
+                                on_click=buttonCallback, 
+                                args=[st.session_state.prompt_buttons[1]], 
+                                use_container_width=True)
                 with btncol3:
-                    st.button(st.session_state.prompt_buttons[2], disabled=st.session_state.prompt_disabled, on_click=submitPrompt, args=[st.session_state.prompt_buttons[2], chat_openai_client])
+                    st.button(st.session_state.prompt_buttons[2],
+                                disabled=st.session_state.prompt_disabled, 
+                                on_click=buttonCallback, 
+                                args=[st.session_state.prompt_buttons[2]],
+                                use_container_width=True)
 
-            prompt = st.chat_input(chatInputPrompts[st.session_state.conv_stage], max_chars=250, disabled=st.session_state.prompt_disabled)
+            prompt = st.chat_input(getChatInputPrompt(), max_chars=250, disabled=st.session_state.prompt_disabled)
             
 
             if (prompt != None) and (prompt.strip() != ""):
                 submitPrompt(prompt, chat_openai_client)
+
 
         with col2.container(border=1):
             st.subheader("Images")
