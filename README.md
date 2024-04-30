@@ -9,6 +9,16 @@ This project is part of my final assignment for a course on Web Mining and Cogni
 ### Prerequisites
 
 To run this app, you need a current version of `Python`, preferably `3.10` or higher.
+
+Furthermore, you will need to install the following packages:
+
+| Package Name | Installation Command |
+|:------------:|:--------------------:|
+|´streamlit´ |´pip install streamlit´|
+|´openai´|´pip install openai´|
+|´langchain´|´pip install --upgrade langchain´|
+|´langchain-openai´|´pip install --upgrade langchain-openai´|
+
 You will also need `streamlit` for running the app, which can be installed by the package manager of your liking, e.g. with `pip install streamlit`.
 Finally, you will need the `openai` package, which can be installed via the same way: `pip install openai`.
 Other packages needed by the script should come with the base installation of your `Python` distribution.
